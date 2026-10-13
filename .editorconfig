@@ -1,0 +1,28 @@
+# Shared editor defaults (https://editorconfig.org).
+# JetBrains IDEs read this natively; VS Code needs the "EditorConfig for VS Code" extension.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Language conventions: PEP 8 for Python, 4 spaces for Java
+[*.py]
+indent_size = 4
+
+[*.java]
+indent_size = 4
+
+# Trailing double-space is a deliberate line break in Markdown
+[*.md]
+trim_trailing_whitespace = false
+
+[Makefile]
+indent_style = tab
+
+[*.{bat,cmd}]
+end_of_line = crlf

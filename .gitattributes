@@ -1,0 +1,25 @@
+# Normalize line endings: every text file is stored and checked out with LF on
+# every OS, overriding each developer's core.autocrlf. CRLF breaks shell scripts
+# in the Linux sandbox images and changes content hashes in the blob store.
+* text=auto eol=lf
+
+# Windows-only scripts must keep CRLF to run correctly
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Binary files: never normalize or text-diff
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.tgz   binary
+*.jar   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary

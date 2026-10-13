@@ -9,65 +9,60 @@ How to get a machine ready to work on this project. For what we're building and 
 | Tool | Required version | Why |
 |------|------------------|-----|
 | Git | any recent | Version control |
-| nvm | 0.40+ | Installs and switches to the project's pinned Node version |
+| fnm | 1.39+ | Cross-platform Node version manager. It reads [.nvmrc](.nvmrc) and switches automatically on `cd`. |
 | Node.js | **24.21.0** (exactly, pinned in [.nvmrc](.nvmrc)) | Next.js app and workers |
 | npm | **11.19.0** (ships with Node 24.21.0) | Package manager. We use npm workspaces, not pnpm or yarn. |
 | Docker Desktop (or Docker Engine) | Docker 28+, Compose v2 | Local Postgres and the code-execution sandbox images |
 
 You do **not** need Python, Java, Maven or PostgreSQL installed locally. They run inside Docker images with pinned versions ([DESIGN.md §14](DESIGN.md#14-pinned-versions)).
 
-**Supported OS:** macOS and Linux. On Windows, work inside **WSL2** (Ubuntu) and follow the Linux instructions there. Docker Desktop's WSL2 backend provides Docker.
+**Supported OS:** macOS, Windows (native, with PowerShell) and Linux. The same tools work on all three.
 
-## 2. Install Node with nvm
+## 2. Install Node with fnm
 
-1. Install nvm if you don't have it: <https://github.com/nvm-sh/nvm#installing-and-updating>
-2. From the repo root:
+We use [fnm](https://github.com/Schniz/fnm) because it runs natively on macOS, Windows and Linux, needs no admin rights, and only affects the current terminal. Already using **nvm** on macOS or Linux? That works too, since it reads the same `.nvmrc`. Run `nvm install && nvm use` in the repo and skip to step 4 below. Don't run both managers' auto-switch hooks in the same shell.
 
-   ```sh
-   nvm install   # reads .nvmrc and installs 24.21.0
-   nvm use       # switches this shell to 24.21.0
-   ```
+### Step 1: install fnm
 
-3. Check:
+| OS | Command |
+|----|---------|
+| macOS | `brew install fnm` |
+| Windows | `winget install Schniz.fnm` (or `scoop install fnm` / `choco install fnm`) |
+| Linux | `curl -fsSL https://fnm.vercel.app/install \| bash`, or your distro's package |
 
-   ```sh
-   node -v   # v24.21.0
-   npm -v    # 11.19.0
-   ```
+### Step 2: hook fnm into your shell
 
-This doesn't change your global default Node version, so other projects keep whatever they use.
+This turns on auto-switching. Add the line for your shell, then **open a new terminal**.
 
-### Optional: switch versions automatically on `cd`
+| Shell | File | Line to add |
+|-------|------|-------------|
+| zsh (macOS default) | `~/.zshrc` | `eval "$(fnm env --use-on-cd --shell zsh)"` |
+| bash / Git Bash | `~/.bashrc` | `eval "$(fnm env --use-on-cd --shell bash)"` |
+| PowerShell | `$PROFILE` (open with `notepad $PROFILE`) | `fnm env --use-on-cd --shell powershell \| Out-String \| Invoke-Expression` |
+| Windows cmd | see the [fnm README](https://github.com/Schniz/fnm#windows-command-prompt-aka-batch-aka-wincmd) | |
 
-Without this, run `nvm use` in each new terminal you open in this repo.
+If you also have nvm loaded in the same profile, put the fnm line **after** it so fnm's Node comes first on your PATH.
 
-**zsh** (macOS default). Add this to `~/.zshrc` **after** the lines that load nvm, then open a new terminal:
+### Step 3: install the project's Node
 
-```zsh
-autoload -U add-zsh-hook
-load-nvmrc() {
-  local nvmrc_path
-  nvmrc_path="$(nvm_find_nvmrc)"
+From the repo root:
 
-  if [ -n "$nvmrc_path" ]; then
-    local nvmrc_node_version
-    nvmrc_node_version=$(nvm version "$(cat "${nvmrc_path}")")
-
-    if [ "$nvmrc_node_version" = "N/A" ]; then
-      nvm install
-    elif [ "$nvmrc_node_version" != "$(nvm version)" ]; then
-      nvm use
-    fi
-  elif [ -n "$(PWD=$OLDPWD nvm_find_nvmrc)" ] && [ "$(nvm version)" != "$(nvm version default)" ]; then
-    echo "Reverting to nvm default version"
-    nvm use default
-  fi
-}
-add-zsh-hook chpwd load-nvmrc
-load-nvmrc
+```sh
+fnm install    # reads .nvmrc and installs 24.21.0
 ```
 
-**bash:** see nvm's [Deeper Shell Integration](https://github.com/nvm-sh/nvm#deeper-shell-integration) section for the bash version.
+### Step 4: check
+
+```sh
+cd .      # or reopen the terminal in the repo
+node -v   # v24.21.0
+npm -v    # 11.19.0
+```
+
+**How switching behaves:**
+- Entering this repo switches the current terminal to 24.21.0.
+- fnm does **not** switch back when you leave. The terminal stays on 24.21.0 until you `cd` into another folder with a version file, or open a new terminal.
+- New terminals start on your fnm default, which you set with `fnm default <version>`.
 
 ## 3. Docker
 
@@ -82,7 +77,7 @@ load-nvmrc
 
 **CPU architecture:** production runs on an ARM (arm64) VM. Apple Silicon Macs build matching images natively. On x86 machines, images build and run locally for x86. That's fine for development, but production images must be built for `linux/arm64`, and the deploy step (DESIGN.md §12, step 16) will handle this.
 
-## 4. Project npm settings (already in the repo)
+## 4. Project settings (already in the repo)
 
 These are committed, so you don't need to set anything up:
 
@@ -90,6 +85,10 @@ These are committed, so you don't need to set anything up:
 - [.npmrc](.npmrc):
   - `save-exact=true`: `npm install <pkg>` records the exact version (`16.4.0`, not `^16.4.0`). Every dependency in this repo is pinned.
   - `engine-strict=true`: npm refuses to install when your Node or npm doesn't match the `engines` field in `package.json`. That field will be added at scaffold time.
+- [.gitattributes](.gitattributes) forces **LF line endings** for every text file on every OS, overriding your personal `core.autocrlf`. Windows CRLF line endings break shell scripts inside the Linux sandbox images and change file hashes in the blob store. The exceptions are `.bat`/`.cmd`, which keep CRLF, and binary files, which are never converted.
+- [.editorconfig](.editorconfig) sets shared editor defaults: UTF-8, LF, a final newline, trimmed trailing whitespace, and 2-space indents (4 for Python and Java).
+  - **VS Code users:** install the [EditorConfig for VS Code](https://marketplace.visualstudio.com/items?itemName=EditorConfig.EditorConfig) extension. Without it, VS Code ignores the file.
+  - JetBrains IDEs support it natively.
 
 **Rules for adding dependencies**
 - Use the exact versions in [DESIGN.md §14](DESIGN.md#14-pinned-versions).
@@ -116,7 +115,10 @@ docker info > /dev/null && echo "docker: running"
 
 | Symptom | Fix |
 |---------|-----|
-| `node -v` shows a different version in this repo | Run `nvm use`, or add the auto-switch hook (§2) and open a new terminal. VS Code terminals opened before you edited `~/.zshrc` need to be reopened. |
-| `npm ERR! code EBADENGINE` | Your Node or npm version doesn't match `engines`. Run `nvm use`, then retry. |
-| `nvm: command not found` | nvm isn't loaded in your shell profile. Re-run the nvm install script, or check that `~/.zshrc` / `~/.bashrc` sources `$NVM_DIR/nvm.sh`. |
+| `node -v` shows a different version in this repo | Run `fnm use` (or `nvm use`). If it keeps happening, check the fnm line from §2 is in your shell profile, then open a new terminal. VS Code terminals opened before you edited the profile need to be reopened. |
+| `npm ERR! code EBADENGINE` | Your Node or npm version doesn't match `engines`. Run `fnm use` (or `nvm use`), then retry. |
+| `fnm: command not found` / `fnm` not recognized | Open a new terminal after installing. On Windows, check that winget's install folder is on your PATH. |
+| PowerShell: "running scripts is disabled on this system" when loading `$PROFILE` | Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once, then reopen PowerShell. |
+| Node keeps changing between two versions | Both the fnm and nvm auto-switch hooks are active. Keep only one in your shell profile. |
+| `/bin/sh^M: bad interpreter` or `exec format error` from a script in a container | The file has CRLF line endings, usually because the clone predates `.gitattributes`. Run `git rm --cached -r . && git reset --hard`. This discards uncommitted changes, so commit or stash first. |
 | `Cannot connect to the Docker daemon` | Docker Desktop isn't running. Start it and wait for "Engine running". |
