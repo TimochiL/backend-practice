@@ -1,0 +1,19 @@
+{
+  "name": "backend-practice (build image locally)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1.10.1": {
+      "version": "29.9.0",
+      "moby": false
+    }
+  },
+  "remoteUser": "node",
+  "forwardPorts": [3000],
+  "customizations": {
+    "vscode": {
+      "extensions": ["EditorConfig.EditorConfig"]
+    }
+  }
+}

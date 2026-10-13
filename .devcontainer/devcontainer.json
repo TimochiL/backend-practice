@@ -1,0 +1,4 @@
+{
+  "name": "backend-practice",
+  "image": "ghcr.io/timochil/backend-practice-dev:1"
+}
