@@ -110,6 +110,8 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Note: this action pushes in its post-job phase (after all steps in this
+      # job), so verification lives in the separate `verify` job below.
       - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
         with:
           configFile: .devcontainer/image/devcontainer.json
@@ -118,7 +120,25 @@ jobs:
           platform: linux/amd64,linux/arm64
           push: always
 
-      - name: Show published platforms
+  verify:
+    name: Verify published platforms
+    needs: [check, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: read
+    steps:
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check amd64 and arm64 are published
         env:
           REF: ${{ needs.check.outputs.ref }}
-        run: docker buildx imagetools inspect "$REF"
+        run: |
+          docker buildx imagetools inspect "$REF"
+          platforms="$(docker buildx imagetools inspect "$REF" --format '{{json .Manifest}}' | jq -r '.manifests[].platform | "\(.os)/\(.architecture)"')"
+          for p in linux/amd64 linux/arm64; do
+            grep -qx "$p" <<< "$platforms" || { echo "::error::$REF is missing $p"; exit 1; }
+          done
