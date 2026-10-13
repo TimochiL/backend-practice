@@ -7,3 +7,6 @@
 # ships git, curl and an ssh client. The Docker CLI comes from the
 # docker-outside-of-docker feature in ./devcontainer.json.
 FROM node:24.21.0-trixie
+
+# Links the GHCR package to the repo (shows on the repo page, inherits access)
+LABEL org.opencontainers.image.source="https://github.com/TimochiL/backend-practice"

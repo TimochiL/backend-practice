@@ -1,0 +1,124 @@
+# Builds the dev container image (.devcontainer/image/) for linux/amd64 and
+# linux/arm64 and pushes it to GHCR under the reference in
+# .devcontainer/devcontainer.json ("image" field; keep that file comment-free
+# so jq can read it).
+#
+# Published tags are immutable. If the tag already exists:
+#   - push that changed .devcontainer/image/ -> fail (bump the tag)
+#   - push that did not change it            -> skip (nothing to build)
+#   - manual run                             -> fail (bump the tag)
+#
+# Actions are pinned to commit SHAs; the comment shows the release.
+name: Dev container image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .devcontainer/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: devcontainer-image
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Check tag is unpublished
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      ref: ${{ steps.image.outputs.ref }}
+      name: ${{ steps.image.outputs.name }}
+      tag: ${{ steps.image.outputs.tag }}
+      build: ${{ steps.guard.outputs.build }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history, to diff against the previous push
+
+      - name: Read image reference
+        id: image
+        run: |
+          ref="$(jq -r '.image' .devcontainer/devcontainer.json)"
+          name="${ref%:*}"
+          tag="${ref##*:}"
+          if [[ "$name" != ghcr.io/* || ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+            echo "::error file=.devcontainer/devcontainer.json::Expected \"image\": \"ghcr.io/<owner>/<name>:<tag>\", got \"$ref\""
+            exit 1
+          fi
+          {
+            echo "ref=$ref"
+            echo "name=$name"
+            echo "tag=$tag"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse to overwrite a published tag
+        id: guard
+        env:
+          REF: ${{ steps.image.outputs.ref }}
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if ! docker buildx imagetools inspect "$REF" > /dev/null 2>&1; then
+            echo "$REF is not published yet; building."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          image_changed=true
+          if [[ "$EVENT" == push ]] && git cat-file -e "${BEFORE}^{commit}" 2> /dev/null; then
+            git diff --quiet "$BEFORE" HEAD -- .devcontainer/image && image_changed=false
+          fi
+
+          if [[ "$image_changed" == true ]]; then
+            echo "::error file=.devcontainer/devcontainer.json::$REF is already published and tags are immutable. Bump the tag in .devcontainer/devcontainer.json."
+            exit 1
+          fi
+          echo "::notice::$REF is already published and .devcontainer/image is unchanged; nothing to build."
+          echo "build=false" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build and push (amd64 + arm64)
+    needs: check
+    if: needs.check.outputs.build == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: devcontainers/ci@513af61f4de4f75d37e4438f184ba4358f0fc1ca # v0.3.1900000450
+        with:
+          configFile: .devcontainer/image/devcontainer.json
+          imageName: ${{ needs.check.outputs.name }}
+          imageTag: ${{ needs.check.outputs.tag }}
+          platform: linux/amd64,linux/arm64
+          push: always
+
+      - name: Show published platforms
+        env:
+          REF: ${{ needs.check.outputs.ref }}
+        run: docker buildx imagetools inspect "$REF"
