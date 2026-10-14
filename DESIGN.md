@@ -1,6 +1,6 @@
 # Backend Practice Platform: Design
 
-Status: draft v2 (2026-10-13): Better Auth replaces Auth.js; versions pinned (§14)
+Status: draft v3 (2026-10-13): Better Auth replaces Auth.js; versions pinned (§14); dev container environment (§15); sandbox file streaming (§6.2)
 Reference material: [product-references.md](product-references.md)
 
 ## 1. Goals
@@ -73,6 +73,8 @@ templates/
   problems/<framework>/<template-id>/   problem templates (see §4)
 sandbox-images/{node,django,spring}/Dockerfile
 infra/                 docker-compose.yml, Caddyfile, backup script
+.devcontainer/         dev environment (see §15)
+.github/workflows/     CI (dev container image build)
 ```
 
 Templates are git-versioned files. A sync script upserts them into the `templates` and `base_repos` tables and the blob store.
@@ -212,24 +214,42 @@ type Manifest = ManifestEntry[];   // sorted by path
 ### 6.1 Container settings (every job)
 
 ```
-docker run --rm --network none --read-only \
+docker run -i --rm --network none --read-only \
   --tmpfs /work:rw,size=256m --tmpfs /tmp:rw,size=64m \
   --user 10001:10001 --cap-drop ALL --security-opt no-new-privileges \
   --pids-limit 256 --memory 1g --cpus 1 \
-  bp-<framework>:<version> <test-command>
+  bp-<framework>:<version> bp-run      # workspace tar on stdin (§6.2)
 ```
 
 - The Spring Boot image gets `--memory 1536m` and a 120 s timeout. The others get 60 s. On timeout the runner kills the container and records `timeout`.
 - Runner concurrency is 2 sandboxes at a time.
 - gVisor (`--runtime runsc`, free) is a later hardening option (step 17).
 
-### 6.2 Input rules
+### 6.2 Moving files in and out: streams, never bind mounts
+
+The runner **never bind-mounts host folders** into a sandbox. All files move through the container's standard streams:
+
+| Stream | Content |
+|--------|---------|
+| stdin | A tar of the assembled workspace (base repo + problem overlay + user files + hidden tests when allowed). It is unpacked into the `/work` tmpfs. |
+| stdout | A tar of `/work/out/` only: `junit.xml` plus any result files. |
+| stderr | Install, build and test logs, captured and truncated (§6.4). |
+
+A small entrypoint baked into each sandbox image (`bp-run`) does `tar -x -C /work`, runs the framework's test command with its output sent to stderr, then `tar -c -C /work/out .` to stdout. The runner runs it with `docker run -i …` (§6.1 flags), writes the tar to stdin, and reads at most 8 MB from stdout before killing the container.
+
+**Why:**
+- **Paths resolve on the wrong machine.** A bind mount names a path *on the Docker host*. The runner itself runs in a container: the production compose `runner` service, or the dev container in development (§15). A folder it creates at `/tmp/job-123` doesn't exist on the host, so a bind mount would silently mount an empty or wrong folder.
+- **Identical everywhere.** Streaming behaves the same on Linux, macOS and Windows hosts, and from inside any container.
+- **Smaller attack surface.** User code never sees a host path, and nothing it writes outlives the container. `/work` is tmpfs and the root filesystem is read-only.
+- **No cleanup.** There are no temp folders to garbage-collect on the host, and `docker cp` isn't needed (it can't read a tmpfs after the container exits anyway).
+
+### 6.3 Input rules
 
 - A user submission may contain **only paths whose mode is `editable`** in the problem manifest. Anything else is rejected.
 - Paths must be relative and normalized, with no `..`, no leading `/`, no backslashes, no NUL, and no symlinks. Limits: per file ≤ 256 KB, total ≤ 2 MB, ≤ 200 files.
 - The runner always writes canonical `readonly` files last, so a user cannot override them. `hidden` test files are added **only** for `submit` and `verify` jobs.
 
-### 6.3 Test commands and result format
+### 6.4 Test commands and result format
 
 All stacks emit JUnit XML, which is parsed by one parser in `packages/core`.
 
@@ -239,9 +259,9 @@ All stacks emit JUnit XML, which is parsed by one parser in `packages/core`.
 | Django | `pytest --junitxml=/work/out/junit.xml` | pytest-django | SQLite |
 | Spring Boot | `mvn -o -q test` | Surefire XML | H2 in-memory |
 
-Stdout and stderr are captured and truncated to 64 KB for display.
+`bp-run` makes sure the JUnit XML ends up in `/work/out/`, e.g. by copying Surefire's `target/surefire-reports/*.xml` there. Logs (stderr) are captured and truncated to 64 KB for display.
 
-### 6.4 Abuse limits
+### 6.5 Abuse limits
 
 Each user can have one active `run`/`submit` job at a time and at most 60 per hour. `web` enforces this before inserting a job.
 
@@ -372,6 +392,7 @@ Each step is reviewed before the next begins.
   - an infinite loop gives `timeout`
   - an outbound HTTP call fails
   - a submitted readonly path is rejected
+  - results are identical when the runner runs from the dev container and from the production `runner` service (§6.2)
 - **End-to-end (local compose):**
   1. Sign in, pick Node, and fail a submit. "Next problem" stays disabled.
   2. Pass a submit. "Next problem" enables, and history shows the timestamp, active time and all tests.
@@ -388,9 +409,9 @@ Checked against npm, PyPI, Maven Central, nodejs.org and Docker Hub on 2026-10-1
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Node.js (dev machine, `web`, workers) | 24.21.0 LTS | Supported to Apr 2028. npm 11.19.0 ships with it. Revisit after Node 26 enters LTS (late Oct 2026). |
+| Node.js (dev container, `web`, workers) | 24.21.0 LTS | Supported to Apr 2028. npm 11.19.0 ships with it. Revisit after Node 26 enters LTS (late Oct 2026). |
 | PostgreSQL | 18.6 (`postgres:18.6` image) | Supported to Nov 2030. |
-| Docker / Compose | 28.4.0 / 2.39.4 (dev machine) | |
+| Docker Desktop (developer machines) | 28+ | The only host requirement besides Git and an editor (§15). |
 
 ### 14.2 Platform packages
 
@@ -417,3 +438,49 @@ Checked against npm, PyPI, Maven Central, nodejs.org and Docker Hub on 2026-10-1
 | `bp-spring` | Java 25 LTS, Maven 3.9.16 | Spring Boot 4.1.1 (4.0's free support ends 2026-12-31). H2 and JUnit 5 versions come from Boot's dependency management. |
 
 The exact patch versions of the image base tags (Python 3.13.x, Temurin 25.x) are pinned when each Dockerfile is written (steps 6, 14 and 15).
+
+### 14.4 Dev environment and CI
+
+| Component | Version | Notes |
+|-----------|---------|-------|
+| Dev container base image | `node:24.21.0-trixie` | Debian 13. npm 11.19.0 is bundled. |
+| docker-outside-of-docker feature | 1.10.1 | Locked by digest in `.devcontainer/image/devcontainer-lock.json`. |
+| Docker CLI (in the dev container) | 29.9.0 | Docker CE packages (`moby: false`; Moby has no trixie builds). |
+| Compose plugin (in the dev container) | not pinned | Whatever is current at image build. Each image tag is built once and never overwritten, so a given tag is still reproducible. |
+| Dev image | `ghcr.io/timochil/backend-practice-dev:1` | Public. Tag set in `.devcontainer/devcontainer.json`. |
+| @devcontainers/cli | 0.89.0 | Local image test builds only, via `npx` (not a project dependency). |
+| GitHub Actions | checkout 7.0.1, setup-qemu 4.4.0, setup-buildx 4.4.1, login 4.6.0, devcontainers/ci 0.3.1900000450 | Pinned to commit SHAs in the workflow. |
+
+## 15. Development environment
+
+All development happens in a **dev container** (`.devcontainer/`). Contributors need only Git, Docker and a dev-container-capable editor. Setup steps for people are in [SETUP.md](SETUP.md). This section records the design decisions.
+
+### 15.1 Image and configs
+
+- **Two configs, one image.**
+  - `.devcontainer/devcontainer.json` (what developers open) only names the published image.
+  - `.devcontainer/image/` (Dockerfile + `devcontainer.json`) is the single source of truth for the image's contents. Its settings (non-root `node` user, port 3000, extensions, the Docker feature's mounts and entrypoint) are baked into the image's `devcontainer.metadata` label, so the developer config needs nothing else.
+- **CI** (`.github/workflows/devcontainer-image.yml`) builds `linux/amd64` + `linux/arm64` and pushes to GHCR. A separate job then verifies both platforms were published.
+- **Immutable tags.** CI refuses to push a tag that already exists. Any change to the image needs a new tag in the developer config, committed alongside it. That gives a reproducible environment per tag, rollback by changing the tag back, and no silent drift from rebuilds.
+
+### 15.2 Docker from inside the dev container
+
+The dev container uses the **host's** Docker daemon (docker-outside-of-docker). Anything it starts, such as Postgres via compose or the code sandboxes, is a *sibling* container on the host, not a child. Consequences:
+
+1. **No host-path bind mounts from inside the dev container.** Docker resolves mount paths on the host, where `/workspaces/backend-practice/...` doesn't exist.
+   - Compose files use **named volumes only**, e.g. `pgdata:/var/lib/postgresql/data`, never `./data:/…`.
+   - The runner streams files to sandboxes (§6.2).
+2. **Networking.** `localhost` inside the dev container is the dev container itself, not the host or compose services. How the app reaches Postgres in development (publishing the port and connecting via `host.docker.internal`, or attaching the dev container to the compose network) is decided in build step 2. On Linux hosts, `host.docker.internal` needs `--add-host=host.docker.internal:host-gateway`.
+3. **Security.** Code running in the dev container controls the host's Docker, including other projects' containers. This is accepted for trusted repo code and documented for contributors in SETUP.md.
+
+### 15.3 Dev vs production layout
+
+| | Development | Production (§2) |
+|---|---|---|
+| `web`, `runner`, `generator` | Run directly in the dev container (npm scripts) | Compose services |
+| Postgres | Compose service, started from the dev container | Compose service |
+| Sandboxes | Sibling containers on the developer's Docker | Sibling containers on the VM's Docker |
+| Docker access for the runner | The dev container's host socket | The `runner` service's mounted socket |
+
+In both columns the runner is a container talking to the host daemon, which is why §6.2's streaming rule covers both.
+
