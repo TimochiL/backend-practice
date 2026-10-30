@@ -11,6 +11,10 @@
     "npm": "11.19.1"
   },
   "scripts": {
+    "dev": "npm run dev --workspace @bp/web",
+    "build": "npm run build --workspace @bp/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
