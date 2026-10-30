@@ -1,7 +1,6 @@
 # Builds the dev container image (.devcontainer/image/) for linux/amd64 and
 # linux/arm64 and pushes it to GHCR under the reference in
-# .devcontainer/devcontainer.json ("image" field; keep that file comment-free
-# so jq can read it).
+# .devcontainer/compose.yml (services.dev.image, read with yq).
 #
 # Published tags are immutable. If the tag already exists:
 #   - push that changed .devcontainer/image/ -> fail (bump the tag)
@@ -45,11 +44,11 @@ jobs:
       - name: Read image reference
         id: image
         run: |
-          ref="$(jq -r '.image' .devcontainer/devcontainer.json)"
+          ref="$(yq -r '.services.dev.image' .devcontainer/compose.yml)"
           name="${ref%:*}"
           tag="${ref##*:}"
           if [[ "$name" != ghcr.io/* || ! "$tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
-            echo "::error file=.devcontainer/devcontainer.json::Expected \"image\": \"ghcr.io/<owner>/<name>:<tag>\", got \"$ref\""
+            echo "::error file=.devcontainer/compose.yml::Expected services.dev.image to be ghcr.io/<owner>/<name>:<tag>, got \"$ref\""
             exit 1
           fi
           {
@@ -83,7 +82,7 @@ jobs:
           fi
 
           if [[ "$image_changed" == true ]]; then
-            echo "::error file=.devcontainer/devcontainer.json::$REF is already published and tags are immutable. Bump the tag in .devcontainer/devcontainer.json."
+            echo "::error file=.devcontainer/compose.yml::$REF is already published and tags are immutable. Bump services.dev.image in .devcontainer/compose.yml."
             exit 1
           fi
           echo "::notice::$REF is already published and .devcontainer/image is unchanged; nothing to build."

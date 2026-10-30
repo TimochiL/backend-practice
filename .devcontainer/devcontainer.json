@@ -1,4 +1,7 @@
 {
   "name": "backend-practice",
-  "image": "ghcr.io/timochil/backend-practice-dev:1"
+  "dockerComposeFile": "compose.yml",
+  "service": "dev",
+  "workspaceFolder": "/workspaces/backend-practice",
+  "shutdownAction": "stopCompose"
 }
