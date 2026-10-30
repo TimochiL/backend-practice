@@ -15,6 +15,9 @@
     "build": "npm run build --workspace @bp/web",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
+    "db:generate": "npm run db:generate --workspace @bp/db",
+    "db:migrate": "npm run db:migrate --workspace @bp/db",
+    "db:check": "npm run db:check --workspace @bp/db",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
