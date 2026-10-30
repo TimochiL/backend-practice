@@ -1,0 +1,10 @@
+# Prettier also skips everything in .gitignore.
+
+# Generated
+package-lock.json
+
+# Hand-written docs: keep their formatting as authored
+*.md
+
+# Claude Code configuration
+.claude/

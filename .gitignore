@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Next.js
+.next/
+out/
+next-env.d.ts
+
+# Build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Env files hold secrets; only the example is committed
+.env
+.env.*
+!.env.example
+
+# Logs and OS files
+*.log
+.DS_Store
