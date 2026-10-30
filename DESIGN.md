@@ -1,6 +1,6 @@
 # Backend Practice Platform: Design
 
-Status: draft v3 (2026-10-13): Better Auth replaces Auth.js; versions pinned (§14); dev container environment (§15); sandbox file streaming (§6.2)
+Status: draft v4 (2026-10-30): build steps 1–2 complete; scaffold and development environment documented (§§14–15)
 Reference material: [product-references.md](product-references.md)
 
 ## 1. Goals
@@ -60,7 +60,7 @@ The browser polls a status endpoint (§8), so no request ever waits on a test ru
 
 ## 3. Repo layout
 
-npm workspaces monorepo:
+Target npm workspaces monorepo. Directories for later build steps are created only when that step begins:
 
 ```
 apps/web/              Next.js (pages, API routes, Better Auth)
@@ -72,8 +72,10 @@ templates/
   base-repos/<framework>/<version>/     shared skeleton projects
   problems/<framework>/<template-id>/   problem templates (see §4)
 sandbox-images/{node,django,spring}/Dockerfile
-infra/                 docker-compose.yml, Caddyfile, backup script
-.devcontainer/         dev environment (see §15)
+infra/                 production compose, Caddyfile, backup script (step 16)
+.devcontainer/
+  compose.yml          dev container + development Postgres
+  image/               reproducible dev image source
 .github/workflows/     CI (dev container image build)
 ```
 
@@ -365,8 +367,8 @@ We use **Better Auth**. It's open source and runs inside `web`, so there is no h
 
 Each step is reviewed before the next begins.
 
-1. DESIGN.md (this document)
-2. Scaffold: npm workspaces, Next.js app, shared tsconfig, local Postgres via compose
+1. **Complete:** DESIGN.md (this document)
+2. **Complete:** npm workspaces, Next.js app, shared tsconfig and development Postgres via `.devcontainer/compose.yml`
 3. Drizzle schema + first migration
 4. Better Auth (GitHub + Google) + protected-route helper + account linking and `/settings` ⚠
 5. Blob store + manifests + path validation, with unit tests ⚠
@@ -403,13 +405,13 @@ Each step is reviewed before the next begins.
 
 ## 14. Pinned versions
 
-Checked against npm, PyPI, Maven Central, nodejs.org and Docker Hub on 2026-10-13. Every dependency is pinned exactly (no `^`/`~`). Sandbox runtimes follow the HackerRank environments in [product-references.md](product-references.md), using the latest patch release of each line.
+Originally checked against npm, PyPI, Maven Central, nodejs.org and Docker Hub on 2026-10-13; scaffold pins were refreshed on 2026-10-30. Every direct dependency is pinned exactly (no `^`/`~`). Sandbox runtimes follow the HackerRank environments in [product-references.md](product-references.md), using the latest patch release of each line.
 
 ### 14.1 Host and services
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Node.js (dev container, `web`, workers) | 24.21.0 LTS | Supported to Apr 2028. npm 11.19.0 ships with it. Revisit after Node 26 enters LTS (late Oct 2026). |
+| Node.js (dev container, `web`, workers) | 24.22.2 LTS | Supported to Apr 2028. npm 11.19.1 ships with it. |
 | PostgreSQL | 18.6 (`postgres:18.6` image) | Supported to Nov 2030. |
 | Docker Desktop (developer machines) | 28+ | The only host requirement besides Git and an editor (§15). |
 
@@ -417,9 +419,14 @@ Checked against npm, PyPI, Maven Central, nodejs.org and Docker Hub on 2026-10-1
 
 | Package | Version | Notes |
 |---------|---------|-------|
-| next | 16.4.0 | Requires Node ≥ 20.9.0. |
-| react, react-dom | 19.3.0 | |
+| next | 16.4.3 | Requires Node ≥ 20.9.0. |
+| react, react-dom | 19.3.1 | |
 | typescript | 5.9.3 | 7.x (the native compiler) is out, but its compatibility with Next.js and drizzle-kit is unverified. |
+| @types/node | 24.19.2 | Development only. |
+| @types/react, @types/react-dom | 19.3.0 | Development only. |
+| tailwindcss, @tailwindcss/postcss | 4.3.3 | CSS framework and PostCSS integration. |
+| eslint / eslint-config-next | 9.39.5 / 16.4.3 | ESLint stays on 9 for compatibility with Next's lint plugins. |
+| prettier / eslint-config-prettier | 3.9.10 / 10.1.8 | The ESLint config disables rules that conflict with Prettier. |
 | better-auth | 1.7.7 | Supports Next 16 and drizzle-orm ^0.45.2. |
 | drizzle-orm / drizzle-kit | 0.45.4 / 0.31.11 | |
 | pg | 8.23.1 | |
@@ -433,7 +440,7 @@ Checked against npm, PyPI, Maven Central, nodejs.org and Docker Hub on 2026-10-1
 
 | Image | Runtime | Packages |
 |-------|---------|----------|
-| `bp-node` | Node 24.21.0 | express 5.3.0, jest 30.5.2, jest-junit 17.0.0, supertest 7.3.1, better-sqlite3 13.0.3 (native, compiled at image build) |
+| `bp-node` | Node 24.22.2 | express 5.3.0, jest 30.5.2, jest-junit 17.0.0, supertest 7.3.1, better-sqlite3 13.0.3 (native, compiled at image build) |
 | `bp-django` | Python 3.13 | Django 5.2.18 (LTS, supported to Apr 2028), djangorestframework 3.18.3, pytest 9.1.1, pytest-django 4.14.0 |
 | `bp-spring` | Java 25 LTS, Maven 3.9.16 | Spring Boot 4.1.1 (4.0's free support ends 2026-12-31). H2 and JUnit 5 versions come from Boot's dependency management. |
 
@@ -443,11 +450,11 @@ The exact patch versions of the image base tags (Python 3.13.x, Temurin 25.x) ar
 
 | Component | Version | Notes |
 |-----------|---------|-------|
-| Dev container base image | `node:24.21.0-trixie` | Debian 13. npm 11.19.0 is bundled. |
+| Dev container base image | `node:24.22.2-trixie` | Debian 13. npm 11.19.1 is bundled. |
 | docker-outside-of-docker feature | 1.10.1 | Locked by digest in `.devcontainer/image/devcontainer-lock.json`. |
 | Docker CLI (in the dev container) | 29.9.0 | Docker CE packages (`moby: false`; Moby has no trixie builds). |
 | Compose plugin (in the dev container) | not pinned | Whatever is current at image build. Each image tag is built once and never overwritten, so a given tag is still reproducible. |
-| Dev image | `ghcr.io/timochil/backend-practice-dev:1` | Public. Tag set in `.devcontainer/devcontainer.json`. |
+| Dev image | `ghcr.io/timochil/backend-practice-dev:2` | Public. Tag set in `.devcontainer/compose.yml`. |
 | @devcontainers/cli | 0.89.0 | Local image test builds only, via `npx` (not a project dependency). |
 | GitHub Actions | checkout 7.0.1, setup-qemu 4.4.0, setup-buildx 4.4.1, login 4.6.0, devcontainers/ci 0.3.1900000450 | Pinned to commit SHAs in the workflow. |
 
@@ -458,27 +465,28 @@ All development happens in a **dev container** (`.devcontainer/`). Contributors 
 ### 15.1 Image and configs
 
 - **Two configs, one image.**
-  - `.devcontainer/devcontainer.json` (what developers open) only names the published image.
-  - `.devcontainer/image/` (Dockerfile + `devcontainer.json`) is the single source of truth for the image's contents. Its settings (non-root `node` user, port 3000, extensions, the Docker feature's mounts and entrypoint) are baked into the image's `devcontainer.metadata` label, so the developer config needs nothing else.
+  - `.devcontainer/devcontainer.json` (what developers open) selects the `dev` service in `.devcontainer/compose.yml`, sets the workspace path and stops Compose when the dev container closes.
+  - `.devcontainer/image/` (Dockerfile + `devcontainer.json`) is the single source of truth for the image's contents. Its settings (non-root `node` user, port 3000, extensions, and Docker feature) are baked into the image's `devcontainer.metadata` label.
 - **CI** (`.github/workflows/devcontainer-image.yml`) builds `linux/amd64` + `linux/arm64` and pushes to GHCR. A separate job then verifies both platforms were published.
-- **Immutable tags.** CI refuses to push a tag that already exists. Any change to the image needs a new tag in the developer config, committed alongside it. That gives a reproducible environment per tag, rollback by changing the tag back, and no silent drift from rebuilds.
+- **Immutable tags.** CI refuses to push a tag that already exists. Any change to the image needs a new `services.dev.image` tag in `.devcontainer/compose.yml`, committed alongside it. That gives a reproducible environment per tag, rollback by changing the tag back, and no silent drift from rebuilds.
 
 ### 15.2 Docker from inside the dev container
 
-The dev container uses the **host's** Docker daemon (docker-outside-of-docker). Anything it starts, such as Postgres via compose or the code sandboxes, is a *sibling* container on the host, not a child. Consequences:
+The dev container uses the **host's** Docker daemon (docker-outside-of-docker). Containers launched through that socket, including future code sandboxes, are *siblings* on the host rather than children. Development Postgres is also a sibling because VS Code starts it alongside `dev` from `.devcontainer/compose.yml`. Consequences:
 
-1. **No host-path bind mounts from inside the dev container.** Docker resolves mount paths on the host, where `/workspaces/backend-practice/...` doesn't exist.
-   - Compose files use **named volumes only**, e.g. `pgdata:/var/lib/postgresql/data`, never `./data:/…`.
+1. **No host-path bind mounts from commands launched inside the dev container.** Docker resolves those paths on the host, where `/workspaces/backend-practice/...` doesn't exist.
+   - VS Code launches `.devcontainer/compose.yml` on the host, so its repository bind mount is valid. Runtime Compose files launched from inside `dev` use **named volumes only**.
+   - Development Postgres stores data in `pgdata:/var/lib/postgresql`; no database directory is bind-mounted from the repository.
    - The runner streams files to sandboxes (§6.2).
-2. **Networking.** `localhost` inside the dev container is the dev container itself, not the host or compose services. How the app reaches Postgres in development (publishing the port and connecting via `host.docker.internal`, or attaching the dev container to the compose network) is decided in build step 2. On Linux hosts, `host.docker.internal` needs `--add-host=host.docker.internal:host-gateway`.
+2. **Networking.** The `dev` and `db` services share the Compose network. The app connects to `db:5432` through `DATABASE_URL=postgres://postgres@db:5432/bp`; port 5432 is not published to the host.
 3. **Security.** Code running in the dev container controls the host's Docker, including other projects' containers. This is accepted for trusted repo code and documented for contributors in SETUP.md.
 
 ### 15.3 Dev vs production layout
 
-| | Development | Production (§2) |
+| | Development | Production (step 16) |
 |---|---|---|
 | `web`, `runner`, `generator` | Run directly in the dev container (npm scripts) | Compose services |
-| Postgres | Compose service, started from the dev container | Compose service |
+| Postgres | `db` service in `.devcontainer/compose.yml`, started with the dev container | Compose service in `infra/` |
 | Sandboxes | Sibling containers on the developer's Docker | Sibling containers on the VM's Docker |
 | Docker access for the runner | The dev container's host socket | The `runner` service's mounted socket |
 
